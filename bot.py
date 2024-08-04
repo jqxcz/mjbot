@@ -8,6 +8,8 @@ from typing import *
 
 import configparser
 
+from interactions.utils import spread_to_rows
+
 ########
 # Init
 ########
@@ -70,9 +72,10 @@ class PlayerRecord(dict):
 
 
 class RiichiRecord(PlayerRecord):
-    def __init__(self, p1, p2, p3, p4, early=False):
+    def __init__(self, p1, p2, p3, p4, early=False, round="East"):
         super().__init__(p1, p2, p3, p4)
         self['early'] = early
+        self['round'] = round
 
 
 state: "dict[str, RiichiRecord]" = {}
@@ -96,6 +99,16 @@ class HKRound(dict):
         self['p3'] = players['p3']
         self['p4'] = players['p4']
 
+@bot.command()
+@interactions.option(required=True)
+async def add_player(ctx: interactions.CommandContext, player: str):
+    """Add a player to ranked spreadsheet (admin only)"""
+    if await admin_check(ctx):
+        return
+    await ctx.defer(ephemeral=True);
+    gs.add_player(player)
+    gs.refresh_leaderboards()
+    await ctx.send(f"Added player {player}.")
 
 @bot.command()
 @interactions.option(required=True, autocomplete=True)
@@ -143,6 +156,44 @@ async def refresh(ctx: interactions.CommandContext):
 
 
 @bot.command()
+@interactions.option(required=True, autocomplete=True)
+async def player_stats(ctx: interactions.CommandContext, name: str):
+    riichi_points = gs.riichi_leaderboards.get(name, "Not found")
+    hk_points = gs.hk_leaderboards.get(name, "Not found")
+
+    riichi_ranks = list(map(lambda x: x[0], sorted(gs.riichi_leaderboards.items(),
+                 reverse=True, key=lambda x: float(x[1]))))
+    hk_ranks = list(map(lambda x: x[0], sorted(gs.hk_leaderboards.items(),
+                 reverse=True, key=lambda x: float(x[1]))))
+
+    if name in riichi_ranks:
+        riichi_rank = f"#{riichi_ranks.index(name) + 1}"
+    else:
+        riichi_rank = "No data"
+
+    if name in hk_ranks:
+        hk_rank = f"#{hk_ranks.index(name) + 1}"
+    else:
+        hk_rank = "No data"
+
+    await ctx.send(embeds=interactions.Embed(
+        title=f"Player Stats ({name})",
+        fields=[
+            interactions.EmbedField(
+                name="Riichi",
+                value=f"{riichi_points} ({riichi_rank})",
+                inline=True
+            ),
+            interactions.EmbedField(
+                name="HK",
+                value=f"{hk_points} ({hk_rank})",
+                inline=True
+            ),
+        ])
+    )
+    
+
+@bot.command()
 async def leaderboard(ctx: interactions.CommandContext):
     pass
 
@@ -154,7 +205,7 @@ async def riichi_leaderboard(ctx: interactions.CommandContext):
     top = sorted(gs.riichi_leaderboards.items(),
                  reverse=True, key=lambda x: float(x[1]))[:10]
 
-    players = '\n'.join(map(lambda x: f"{x[0]+1}. {x[1][0]}", enumerate(top)))
+    players = '\n'.join(map(lambda x: f"#{x[0]+1}:\t{x[1][0]}", enumerate(top)))
     scores = '\n'.join(map(lambda x: x[1], top))
     await ctx.send(embeds=interactions.Embed(
         title=f"Riichi Leaderboards",
@@ -180,7 +231,7 @@ async def hk_leaderboard(ctx: interactions.CommandContext):
     top = sorted(gs.hk_leaderboards.items(), reverse=True,
                  key=lambda x: float(x[1]))[:10]
 
-    players = '\n'.join(map(lambda x: f"{x[0]+1}. {x[1][0]}", enumerate(top)))
+    players = '\n'.join(map(lambda x: f"#{x[0]+1}:\t{x[1][0]}", enumerate(top)))
     scores = '\n'.join(map(lambda x: x[1], top))
     await ctx.send(embeds=interactions.Embed(
         title=f"HK Leaderboards",
@@ -388,28 +439,42 @@ async def hk_add_round_click(ctx: interactions.CommandContext):
     gamestate = hkstate[ctx.channel.id]
     round = len(gamestate['rounds']) + 1
     gamestate['rounds'].append(HKRound(gamestate['players']))
-    await ctx.send(embeds=interactions.Embed(title="HK Game", description=f"Round {round}"),
-                   components=[hk_winner])
+    msg = await ctx.send(
+        embeds=interactions.Embed(
+        description=f"Round {round}",
+        fields=[
+            interactions.EmbedField(name="Winner", value="<empty>"),
+            interactions.EmbedField(name="Dealt in", value="<empty>"),
+            interactions.EmbedField(name="Hand shape", value="<empty>"),
+            interactions.EmbedField(name="Special hand", value="<empty>"),
+            interactions.EmbedField(name="Additional fan", value="<empty>")
+        ]),
+        components=spread_to_rows(
+            hk_winner,
+            hk_dealer,
+            hk_shapes,
+            hk_special, 
+            hk_additional
+        ))
+    await msg.reply(components=[hk_cancel, hk_submit])
 
 
 @bot.component("hk_winner")
-async def hk_winner_select(ctx: interactions.CommandContext, val):
+async def hk_winner_select(ctx: interactions.CommandContext, val=None):
     round = int(ctx.message.embeds[0].description[6:]) - 1
     gamestate = hkstate[ctx.channel.id]
     roundstate = gamestate['rounds'][round]
     roundstate['winner'] = val[0]
     player_number = int(val[0][1])
     player_name = gamestate['players'][f'p{player_number}']
+    winner = f"Player {player_number} ({player_name})"
     await ctx.edit(ctx.message.content,
-                   embeds=ctx.message.embeds[0].add_field(
-                       name="Winner",
-                       value=f"Player {player_number} ({player_name})"
-                   ),
-                   components=[hk_dealer])
+                   embeds=ctx.message.embeds[0].set_field_at(0, name="Winner", value=winner),
+                   components=ctx.message.components)
 
 
 @bot.component("hk_dealer")
-async def hk_dealer_select(ctx: interactions.CommandContext, val):
+async def hk_dealer_select(ctx: interactions.CommandContext, val=None):
     round = int(ctx.message.embeds[0].description[6:]) - 1
     gamestate = hkstate[ctx.channel.id]
     roundstate = gamestate['rounds'][round]
@@ -420,67 +485,74 @@ async def hk_dealer_select(ctx: interactions.CommandContext, val):
     if loser == ctx.message.embeds[0].fields[0].value:
         loser = "Self draw"
     await ctx.edit(ctx.message.content,
-                   embeds=ctx.message.embeds[0].add_field(
+                   embeds=ctx.message.embeds[0].set_field_at(1,
                        name="Dealt in", value=loser
-                   ), components=[hk_shapes])
+                   ), components=ctx.message.components)
 
 
 @bot.component("hk_shapes")
-async def hk_shapes_select(ctx: interactions.CommandContext, val):
+async def hk_shapes_select(ctx: interactions.CommandContext, val=None):
     round = int(ctx.message.embeds[0].description[6:]) - 1
     roundstate = hkstate[ctx.channel.id]['rounds'][round]
     roundstate['shape'] = val
     display = '\n'.join(val)
     if (val == ["Special Hand"]):
         await ctx.edit(ctx.message.content,
-                       embeds=ctx.message.embeds[0].add_field(
+                       embeds=ctx.message.embeds[0].set_field_at(2,
                            name="Hand shape", value=display
-                       ), components=[hk_special])
+                       ), components=ctx.message.components)
     elif ("Special Hand" in val):
         await ctx.send(f"Special hand cannot be combined!", ephemeral=True)
-    elif ("" in val and len(val) > 1):
+    elif ("<none>" in val and len(val) > 1):
         await ctx.send(f"'Additional fan only' cannot be combined!", ephemeral=True)
     else:
         await ctx.edit(ctx.message.content,
-                       embeds=ctx.message.embeds[0].add_field(
+                       embeds=ctx.message.embeds[0].set_field_at(2,
                            name="Hand shape", value=display
-                       ), components=[hk_additional])
+                       ), components=ctx.message.components)
 
 
 @bot.component("hk_special")
-async def hk_special_select(ctx: interactions.CommandContext, val):
+async def hk_special_select(ctx: interactions.CommandContext, val = [""]):
     round = int(ctx.message.embeds[0].description[6:]) - 1
     roundstate = hkstate[ctx.channel.id]['rounds'][round]
     roundstate['special'] = val[0]
+    if val[0] == '<none>':
+        roundstate['special'] = ''
     await ctx.edit(ctx.message.content,
-                   embeds=ctx.message.embeds[0].add_field(
+                   embeds=ctx.message.embeds[0].set_field_at(3,
                        name="Special hand:", value=val[0]
-                   ), components=[hk_cancel, hk_submit])
+                   ), components=ctx.message.components)
 
 
 @bot.component("hk_additional")
-async def hk_additional_select(ctx: interactions.CommandContext, val):
+async def hk_additional_select(ctx: interactions.CommandContext, val=None):
     round = int(ctx.message.embeds[0].description[6:]) - 1
     roundstate = hkstate[ctx.channel.id]['rounds'][round]
     roundstate['additional'] = val
 
     display = '\n'.join(val)
     await ctx.edit(ctx.message.content,
-                   embeds=ctx.message.embeds[0].add_field(
+                   embeds=ctx.message.embeds[0].set_field_at(4,
                        name="Additional fan:", value=display
-                   ), components=[hk_cancel, hk_submit])
+                   ), components=ctx.message.components)
 
 
 @bot.component("hk_cancel")
 async def hk_cancel_click(ctx: interactions.CommandContext):
+    ctx.channel._client = ctx._client
+    original = await ctx.channel.get_message(ctx.message.message_reference.message_id)
     await ctx.message.delete()
+    await original.delete()
     await ctx.send("Round deleted.", ephemeral=True)
 
 
 @bot.component("hk_submit")
 async def hk_submit_click(ctx: interactions.CommandContext):
-    round = int(ctx.message.embeds[0].description[6:]) - 1
-    original = ctx.message
+    ctx.channel._client = ctx._client
+    original = await ctx.channel.get_message(ctx.message.message_reference.message_id)
+    command_message = ctx.message
+    round = int(original.embeds[0].description[6:]) - 1
 
     await ctx.defer(ephemeral=True)
     roundstate = hkstate[ctx.channel.id]['rounds'][round]
@@ -488,6 +560,7 @@ async def hk_submit_click(ctx: interactions.CommandContext):
     gs.add_hk_round(roundstate)
 
     await original.disable_all_components()
+    await command_message.disable_all_components()
     await ctx.send("Round submitted", ephemeral=True, components=[hk_add_round])
 
 
@@ -498,10 +571,16 @@ async def hk_submit_click(ctx: interactions.CommandContext):
 @interactions.option(required=False, autocomplete=True)
 @interactions.option(required=False,
                      choices=[
+                        interactions.Choice(name="East", value="East"),
+                        interactions.Choice(name="South", value="South"),
+                     ]
+                     )
+@interactions.option(required=False,
+                     choices=[
                          interactions.Choice(name="Early finish", value=1)
                      ]
                      )
-async def riichi(ctx: interactions.CommandContext, p1: str, p2: str, p3: str, p4: str = "3 Player Ghost", early: int = 0):
+async def riichi(ctx: interactions.CommandContext, p1: str, p2: str, p3: str, p4: str = "3 Player Ghost", round: str = "East", early: int = 0):
     """Record a Riichi game (admin only)"""
     if await admin_check(ctx):
         return
@@ -523,11 +602,6 @@ async def riichi(ctx: interactions.CommandContext, p1: str, p2: str, p3: str, p4
                     inline=True,
                 ),
                 interactions.EmbedField(
-                    name='\u200b',
-                    value='\u200b',
-                    inline=True,
-                ),
-                interactions.EmbedField(
                     name=f"Player 3",
                     value=p3,
                     inline=True
@@ -536,11 +610,6 @@ async def riichi(ctx: interactions.CommandContext, p1: str, p2: str, p3: str, p4
                     name=f"Player 4",
                     value=p4,
                     inline=True
-                ),
-                interactions.EmbedField(
-                    name='\u200b',
-                    value='\u200b',
-                    inline=True,
                 ),
                 *(
                     (interactions.EmbedField(
@@ -551,7 +620,7 @@ async def riichi(ctx: interactions.CommandContext, p1: str, p2: str, p3: str, p4
             ],
         ), components=[riichi_score]
     )
-    state[msg.id] = RiichiRecord(p1, p2, p3, p4, early=bool(early))
+    state[msg.id] = RiichiRecord(p1, p2, p3, p4, early=bool(early), round=round)
 
 
 @bot.component('riichi_score')
@@ -594,6 +663,7 @@ async def riichi_score_click(ctx: interactions.CommandContext):
 @bot.autocomplete(command="hk", name="p2")
 @bot.autocomplete(command="hk", name="p3")
 @bot.autocomplete(command="hk", name="p4")
+@bot.autocomplete(command="player_stats", name="name")
 async def player_autocomplete(ctx, prefix: str = ""):
     matching = [p for p in gs.players if p.lower().startswith(prefix.lower())]
     if len(matching) == 0:
@@ -614,9 +684,15 @@ async def player_autocomplete(ctx, prefix: str = ""):
 @bot.modal("riichi_form")
 async def modal_response(ctx: interactions.CommandContext, s1: str, s2: str, s3: str, s4: str):
     r = state[ctx.message.id]
-
-    if sum(map(int, (s1, s2, s3, s4))) != 100000:
-        await ctx.send("Total does not sum to 100000!", ephemeral=True)
+    total = sum(map(int, (s1, s2, s3, s4)))
+    if total != 100000:
+        await ctx.send(f"""Total does not sum to 100000!
+Recorded scores were:
+    P1: {s1}
+    P2: {s2}
+    P3: {s3}
+    P4: {s4}
+Total is {total}.""", ephemeral=True)
         return
 
     r.set_score(s1, s2, s3, s4)
@@ -630,7 +706,11 @@ async def modal_response(ctx: interactions.CommandContext, s1: str, s2: str, s3:
         r[f'p{i}'] = order[i-1][1]
         r[f's{i}'] = str(order[i-1][0])
 
-    await ctx.edit(
+    
+    original = ctx.message
+    await ctx.defer(ephemeral=True)
+
+    await original.edit(
         embeds=interactions.Embed(
             title=f"Riichi Game ({datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')})",
             fields=[
@@ -645,11 +725,6 @@ async def modal_response(ctx: interactions.CommandContext, s1: str, s2: str, s3:
                     inline=True
                 ),
                 interactions.EmbedField(
-                    name='\u200b',
-                    value='\u200b',
-                    inline=True,
-                ),
-                interactions.EmbedField(
                     name=f"Player 3 ({r['p3']})",
                     value=r['s3'],
                     inline=True
@@ -659,11 +734,6 @@ async def modal_response(ctx: interactions.CommandContext, s1: str, s2: str, s3:
                     value=r['s4'],
                     inline=True
                 ),
-                interactions.EmbedField(
-                    name='\u200b',
-                    value='\u200b',
-                    inline=True,
-                ),
                 *(
                     (interactions.EmbedField(
                         name=f"Notes:",
@@ -671,8 +741,9 @@ async def modal_response(ctx: interactions.CommandContext, s1: str, s2: str, s3:
                     ),) if r['early'] else tuple()
                 )
             ],
-        ), components=[riichi_cancel, riichi_submit]
+        ), components=[riichi_cancel, riichi_submit, riichi_score]
     )
+    await ctx.send("Ready to submit!", ephemeral=True)
 
 
 @bot.component("riichi_cancel")
@@ -690,5 +761,11 @@ async def riichi_submit_click(ctx: interactions.CommandContext):
     gs.add_riichi_game(r)
     await ctx.send("Riichi score submitted.", ephemeral=True)
 
-print("Starting bot...")
-bot.start()
+run = True
+while run:
+    print("Starting bot...")
+    run = False
+    try:
+        bot.start()
+    except TypeError:
+        run = True
