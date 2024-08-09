@@ -161,10 +161,10 @@ async def player_stats(ctx: interactions.CommandContext, name: str):
     riichi_points = gs.riichi_leaderboards.get(name, "Not found")
     hk_points = gs.hk_leaderboards.get(name, "Not found")
 
-    riichi_ranks = list(map(lambda x: x[0], sorted(gs.riichi_leaderboards.items(),
-                 reverse=True, key=lambda x: float(x[1]))))
-    hk_ranks = list(map(lambda x: x[0], sorted(gs.hk_leaderboards.items(),
-                 reverse=True, key=lambda x: float(x[1]))))
+    riichi_ranks = [x[0] for x in sorted(gs.riichi_leaderboards.items(),
+                 reverse=True, key=lambda x: float(x[1])) if float(x[1]) != 0]
+    hk_ranks =  [x[0] for x in sorted(gs.hk_leaderboards.items(),
+                 reverse=True, key=lambda x: float(x[1])) if float(x[1]) != 0]
 
     if name in riichi_ranks:
         riichi_rank = f"#{riichi_ranks.index(name) + 1}"
@@ -202,7 +202,7 @@ async def leaderboard(ctx: interactions.CommandContext):
 async def riichi_leaderboard(ctx: interactions.CommandContext):
     """Riichi leaderboard"""
     gs.refresh_leaderboards()
-    top = sorted(gs.riichi_leaderboards.items(),
+    top = sorted([x for x in gs.riichi_leaderboards.items() if float(x[1]) != 0],
                  reverse=True, key=lambda x: float(x[1]))[:10]
 
     players = '\n'.join(map(lambda x: f"#{x[0]+1}:\t{x[1][0]}", enumerate(top)))
@@ -228,8 +228,8 @@ async def riichi_leaderboard(ctx: interactions.CommandContext):
 async def hk_leaderboard(ctx: interactions.CommandContext):
     """HK leaderboard"""
     gs.refresh_leaderboards()
-    top = sorted(gs.hk_leaderboards.items(), reverse=True,
-                 key=lambda x: float(x[1]))[:10]
+    top = sorted([x for x in gs.hk_leaderboards.items() if float(x[1]) != 0],
+                 reverse=True, key=lambda x: float(x[1]))[:10]
 
     players = '\n'.join(map(lambda x: f"#{x[0]+1}:\t{x[1][0]}", enumerate(top)))
     scores = '\n'.join(map(lambda x: x[1], top))

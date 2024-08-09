@@ -120,7 +120,6 @@ hk_additional_values = [
     "Self-Draw off Last Tile of the Wall (+2)",
     "Win off Last Discard (+1)",
     "Win off Robbing a Kong (+1)",
-    "Win off Last Tile Drawn through a Kong (+1)",
     "Concealed Hand (+1)",
 ]
 hk_additional = interactions.SelectMenu(
@@ -132,6 +131,11 @@ hk_additional = interactions.SelectMenu(
                 description='',
             )
             for v in hk_additional_values
+        ),
+        interactions.SelectOption(
+            label="Rinshan (Win off Kong Replacement Tile) (+1)",
+            value="Win off Last Tile Drawn through a Kong (+1)",
+            description="",
         ),
         interactions.SelectOption(
             label='None',
