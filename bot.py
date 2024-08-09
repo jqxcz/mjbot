@@ -48,7 +48,8 @@ async def admin_check(ctx: interactions.CommandContext):
 
 async def channel_check(ctx: interactions.CommandContext):
     if not int(ctx.channel_id) in CHANNELS[str(ctx.guild_id)]:
-        await ctx.send("You don't have permission to perform this action.", ephemeral=True)
+        channels_text = '\n'.join(map(lambda x: f'<#{x}> ({x})', CHANNELS[str(ctx.guild_id)]))
+        await ctx.send(f"Please send scoring commands in the following channel list:\n{channels_text}", ephemeral=True)
         return interactions.StopCommand()
 
 
