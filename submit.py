@@ -85,11 +85,17 @@ class GSheetClient:
                 data[data['winner']], 
                 *map(data.get, remaining)
             ]
+
+        if data['winner'] == data['loser']:
+            win_type = 'Self Draw (2)'
+        elif "Self-Draw (+1)" in data.get('additional', []):
+            win_type = "Self Draw, One player pays all (3)"
+        else:
+            win_type = 'Feed off Player (1)'
+
         row = [
             datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
-            'Feed off Player (1)' 
-                if data['winner'] != data['loser'] 
-                else 'Self Draw (2)',
+            win_type,
             *players,
             ', '.join(data['shape']),
             data.get('special', ''),
