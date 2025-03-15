@@ -10,3 +10,11 @@ Create `config.ini` as follows:
 In `[general]` section: set `riichi_doc`, `riichi_sheet` and `riichi_players`, `hk_doc`, `hk_sheet` and `hk_players`.
 
 Then set `[<server_id_here]` for `role_limit` and `channel_limit` as csv, for role id and channel id in discord.
+
+
+when running in terminal, use screen -t mjbot, when reconnect to the vitual terminal, do screen -r, press ctrl+a + d to close it.
+
+
+put config detail in config.ini
+put the dicord token in .env
+NEVER git push the .env client_secret.json and config.ini
